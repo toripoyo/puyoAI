@@ -8,8 +8,6 @@ class PuyoAI():
         self.__fieldClass = puyoField.PuyoField()
         self.__place_pattern = 22   # あるツモを置けるパターン
         
-        self._evalution_way = 0     # 1:連鎖得点で評価　0:連鎖数で評価
-        
         # ★アニメ保存用
         self.__max_chain = 0
 
@@ -56,7 +54,7 @@ class PuyoAI():
         # 指定1ツモで実現可能な連鎖数の配列（22通り）を求める
         next_field_score = np.zeros(self.__place_pattern)
         for i in np.arange(self.__place_pattern):
-            next_field_score[i] = self.__fieldClass.getChainScore(tsumo1_field[:,:,i])[self._evalution_way]
+            next_field_score[i] = self.__fieldClass.getChainScore(tsumo1_field[:,:,i])[1]
         
         return np.max(next_field_score), np.average(next_field_score)
 
@@ -64,9 +62,10 @@ class PuyoAI():
     def __getFieldChainableZoro(self, field):
         max_chain = np.zeros(4)
         for i in np.arange(4):
-            max_chain[i] = self.__getFieldChainable1(field, np.array([i,i]))[self._evalution_way]
+            max_chain[i] = self.__getFieldChainable1(field, np.array([i,i]))[0]
             
         return np.max(max_chain)
+       
 
 # ---------------------------------------------------------------------- #
 # 外部公開関数
@@ -82,10 +81,7 @@ class PuyoAI():
         field_max_height, field_min_height, invalid_place = self.__fieldClass.getFieldHeight(field)
         tani = field_max_height - field_min_height
         if tani >= 4:
-            if self._evalution_way == 1:
-                field_evalution -= tani*500
-            else:
-                field_evalution -= tani/2
+            field_evalution -= tani * 10
 
 
         # 3,4列12段目、13段目に置く置き方はペナルティ
@@ -95,11 +91,11 @@ class PuyoAI():
 
 
         # ぷよを消してしまう置き方をしない
-        now_chain_num = self.__fieldClass.getChainScore(field)[self._evalution_way]     # 現在の連鎖数
+        now_chain_num = self.__fieldClass.getChainScore(field)[0]     # 現在の連鎖数
         # ぷよを消してしまう置き方の場合
-        if now_chain_num > 0:
+        if now_chain_num != 0:
             # 連鎖アニメを保存する
-            if self.__max_chain < now_chain_num:
+            if self.__max_chain < now_chain_num and now_chain_num > 5:
                 self.__max_chain = now_chain_num
                 self.__fieldClass.saveChainAnime(field)
             field_evalution -= 999999
@@ -109,26 +105,28 @@ class PuyoAI():
         next_field_score1 = np.zeros(self.__place_pattern)                              # 1ツモ目で実現可能な得点
         next_field_score2 = np.zeros((self.__place_pattern, self.__place_pattern))      # 2ツモ目で実現可能な得点
         next_field_score_zoro = self.__getFieldChainableZoro(field)                     # ゾロ目で実現可能な得点
-        
+        next_field_score_zoro -= self.__fieldClass.getChainedField(field)[2] * 50       # 消した後の残りぷよ個数
+        #next_field_score_zoro += np.sum(self.__fieldClass.checkConnectCountAll(field))  # 連結数
+
+
         # 1ツモ目の全フィールドの組み合わせを取得
         tsumo1_field = self.__getPlaceableAllField(field, tsumo1)
         for i in np.arange(self.__place_pattern):
             # 1ツモ目で実現可能な得点
-            next_field_score1[i] = self.__fieldClass.getChainScore(tsumo1_field[:,:,i])[self._evalution_way]
+            next_field_score1[i] = self.__fieldClass.getChainScore(tsumo1_field[:,:,i])[1]          # 連鎖得点
+            next_field_score1[i] -= self.__fieldClass.getChainedField(tsumo1_field[:,:,i])[2] * 50  # 消した後の残りぷよ個数
+            #next_field_score1[i] += np.sum(self.__fieldClass.checkConnectCountAll(tsumo1_field[:,:,i])) # 連結数
             
             # 2ツモ目の全フィールドの組み合わせを取得（1ツモ目で消さない場合のみ）
             if next_field_score1[i] <= 0:
                 tsumo2_field = self.__getPlaceableAllField(tsumo1_field[:,:,i], tsumo2)
                 for j in np.arange(self.__place_pattern):
-                    next_field_score2[i, j] = self.__fieldClass.getChainScore(tsumo2_field[:,:,j])[self._evalution_way]
-                    
-                    # 2ツモ目でも消せない場合は推定3ツモ目で評価（クソツモ救済用）
-                    #if next_field_score2[i, j] <= 0:
-        
-        
+                    next_field_score2[i, j] = self.__fieldClass.getChainScore(tsumo2_field[:,:,j])[1]          # 連鎖得点
+                    next_field_score2[i, j] -= self.__fieldClass.getChainedField(tsumo2_field[:,:,i])[2] * 50  # 消した後の残りぷよ個数
+                    #next_field_score2[i, j] += np.sum(self.__fieldClass.checkConnectCountAll(tsumo2_field[:,:,i])) # 連結数
+       
         # フィールド評価値の計算
-        field_evalution += np.max((np.max(next_field_score2), np.max(next_field_score1), next_field_score_zoro)) # 連鎖の最大値
-        field_evalution += (np.average(next_field_score1) + np.average(next_field_score2) + next_field_score_zoro)/20 # 平均的な状態
+        field_evalution += np.max((np.max(next_field_score2), np.max(next_field_score1), next_field_score_zoro)) # 連鎖得点の最大値
         
         return field_evalution
     

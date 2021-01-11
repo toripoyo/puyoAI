@@ -15,7 +15,7 @@ if __name__ == '__main__':
     field = np.zeros((14, 6))
     for i in np.arange(36):
         field, field_evalution = AIClass.getNextField(field, systemClass.getTsumo())
-        field, _ = fieldClass.getChainedField(field)
+        field, _, _ = fieldClass.getChainedField(field)
         
         print(i)
         print(np.flipud(field))

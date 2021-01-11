@@ -24,9 +24,13 @@ class PuyoField():
         self.__img_width = 73     # ぷよ画像の横幅
         self.__img_height = 60    # ぷよ画像の縦幅
         
-        self.__chain_bonus = [0,8,16,32,64,96,128,160,192,224,256,288,320,352,384,416,448,480,512]
+        # 各種ボーナス値
+        self.__chain_bonus = [0,40,55,70,90,110,128,160,192,224,256,288,320,352,384,416,448,480,512]
         self.__same_erase_bonus = [0,2,3,4,5,6,7,10]
         self.__color_bonus = [0,3,6,12,24]
+        
+        # リエントラント管理用
+        self.__doing = False
     
     # 指定マスのぷよの繋がっている個数を調べる
     def __checkConnectCount(self, field, field_mask, x_index, y_index, color, count):
@@ -56,28 +60,16 @@ class PuyoField():
             count += self.__checkConnectCount(field, field_mask, x_index  , y_index-1, color, count)
             count += self.__checkConnectCount(field, field_mask, x_index  , y_index+1, color, count)
         return count
-
-    # フィールド全体のぷよの繋がっている個数を調べる
-    def __checkConnectCountAll(self, field):
-        result_field = np.zeros((self.field_height, self.field_width))
-        
-        for x_index in np.arange(self.field_width):
-            for y_index in np.arange(self.field_height):
-                chain_test_color = field[y_index, x_index]                              # 連鎖を調べる色
-                if chain_test_color > 0 or result_field[y_index, x_index] != 0:         # 空きマス、チェック済みマス以外だけ計算
-                    field_check_mask = np.zeros((self.field_height, self.field_width))  # 連鎖チェック用マスク
-                    result_field[y_index, x_index] = self.__checkConnectCount(field, field_check_mask, x_index, y_index, chain_test_color, 0)
-                    result_field[np.where(field_check_mask != 0)] = result_field[y_index, x_index]
-        
-        return result_field
-    
+   
     # 繋がっているぷよを消す
     def __erasePuyo(self, field):
         field = field.copy()
-        result_field = self.__checkConnectCountAll(field)
+        result_field = self.checkConnectCountAll(field)
         field[np.where(result_field >= 4)] = 0
-        return field, np.size(field[np.where(result_field >= 4)])
-    
+        erase_count = np.size(field[np.where(result_field >= 4)])
+        erase_color_count = np.size(np.unique(field[np.where(result_field >= 4)]))
+        return field, erase_count, erase_color_count
+        
     # フィールドのぷよを落下させる
     def __dropPuyo(self, field):
         field = field.copy()
@@ -101,21 +93,36 @@ class PuyoField():
             zero_add_size = self.field_height+2 - np.size(y_empty_cut)
             field[:,x_index] = np.hstack((y_empty_cut, np.zeros(zero_add_size)))
         return field[:self.field_height,:]
-    
+
+    # フィールド全体のぷよの繋がっている個数を調べる
+    def checkConnectCountAll(self, field):
+        result_field = np.zeros((self.field_height, self.field_width))
+        
+        for x_index in np.arange(self.field_width):
+            for y_index in np.arange(self.field_height):
+                chain_test_color = field[y_index, x_index]                              # 連鎖を調べる色
+                if chain_test_color > 0 or result_field[y_index, x_index] != 0:         # 空きマス、チェック済みマス以外だけ計算
+                    field_check_mask = np.zeros((self.field_height, self.field_width))  # 連鎖チェック用マスク
+                    result_field[y_index, x_index] = self.__checkConnectCount(field, field_check_mask, x_index, y_index, chain_test_color, 0)
+                    result_field[np.where(field_check_mask != 0)] = result_field[y_index, x_index]
+        
+        return result_field
+
     # ぷよを消した後のフィールドを求める
     def getChainedField(self, field):
-        erase_count = 0
         chain_count = 0
         field = field.copy()
 
-        field, erase_count = self.__erasePuyo(field)
+        field, erase_count, _ = self.__erasePuyo(field)
         field = self.__dropPuyo(field)
         while(erase_count > 0):
             chain_count += 1
-            field, erase_count = self.__erasePuyo(field)
+            field, erase_count, _ = self.__erasePuyo(field)
             field = self.__dropPuyo(field)
+        
+        res_puyo_num = self.getPuyoNum(field)
             
-        return field, chain_count
+        return field, chain_count, res_puyo_num
     
     # フィールドのぷよの高さを調べる
     def getFieldHeight(self, field):
@@ -145,30 +152,26 @@ class PuyoField():
         field = field.copy()
         field_puyo_only = field[np.where(field > 0)]
         return np.size(field_puyo_only)
-    
-    # フィールドのごみぷよの数を調べる
-    
-    # フィールドの副砲の連鎖数を調べる
 
-    # フィールドの連鎖数と得点（★暫定★）を調べる
+    # フィールドの連鎖数と得点を調べる
     def getChainScore(self, field):
         chain_count = 0
         chain_score = 0
         field = field.copy()
         
-        field, erase_count = self.__erasePuyo(field)
+        field, erase_count, erase_color_count = self.__erasePuyo(field)
         field = self.__dropPuyo(field) 
         while(erase_count > 0):
             chain_count += 1
-            field, erase_count = self.__erasePuyo(field)
+            field, erase_count, erase_color_count = self.__erasePuyo(field)
             field = self.__dropPuyo(field) 
                 
             # 得点計算
             chain_bonus = self.__chain_bonus[np.clip(chain_count-1, 0, 18)]
             same_erase_bonus = self.__same_erase_bonus[np.clip(erase_count-4, 0, 7)]
-            #color_bonus =
+            color_bonus = self.__color_bonus[np.clip(0, 4, erase_color_count)]
             
-            chain_score += erase_count * (chain_bonus + same_erase_bonus) * 10
+            chain_score += erase_count * (chain_bonus + same_erase_bonus + color_bonus) * 10
         
         if chain_count > 0 and chain_score == 0:
             chain_score = 10
@@ -179,8 +182,7 @@ class PuyoField():
     def getImage(self, field):
         field = field.copy()
         field_img = Image.new("RGB", (self.__img_blank.width  * self.field_width, 
-                                      self.__img_blank.height * self.field_height))
-        
+                                      self.__img_blank.height * self.field_height))           
         for y_index in np.arange(self.field_height):
             for x_index in np.arange(self.field_width):
                 index_color = np.int(field[y_index, x_index])
@@ -190,18 +192,21 @@ class PuyoField():
     
     # 連鎖アニメを保存する
     def saveChainAnime(self, field):
-        erase_count = 9999
-        chain_count = -1
-        imgs = []
-        field = field.copy()
-        
-        while(erase_count > 0):
-            imgs.append(self.getImage(field))
-            field, erase_count = self.__erasePuyo(field)
-            field = self.__dropPuyo(field)
-            chain_count += 1
-         
-        imgs[0].save("result_" + str(chain_count) + ".gif",save_all=True, append_images=imgs[1:], optimize=False, duration=750, loop=0)
+        if self.__doing == False:
+            self.__doing = True
+            erase_count = 9999
+            chain_count = -1
+            imgs = []
+            field = field.copy()
+            
+            while(erase_count > 0):
+                imgs.append(self.getImage(field))
+                field, erase_count, _ = self.__erasePuyo(field)
+                field = self.__dropPuyo(field)
+                chain_count += 1
+             
+            imgs[0].save("result" + str(chain_count) + ".gif", save_all=True, append_images=imgs[1:], optimize=False, duration=750, loop=0)
+            self.__doing = False
 
 
 # ---------------------------------------------------------------------- #
